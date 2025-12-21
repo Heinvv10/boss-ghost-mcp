@@ -39,11 +39,11 @@ process.on('unhandledRejection', (reason, promise) => {
   logger('Unhandled promise rejection', promise, reason);
 });
 
-logger(`Starting Chrome DevTools MCP Server v${VERSION}`);
+logger(`Starting BOSS Ghost MCP Server v${VERSION}`);
 const server = new McpServer(
   {
-    name: 'chrome_devtools',
-    title: 'Chrome DevTools MCP server',
+    name: 'boss_ghost_mcp',
+    title: 'BOSS Ghost MCP - Stealth Enhanced Browser Automation',
     version: VERSION,
   },
   {capabilities: {logging: {}}},
@@ -81,6 +81,14 @@ async function getContext(): Promise<McpContext> {
           args: extraArgs,
           acceptInsecureCerts: args.acceptInsecureCerts,
           devtools,
+          // 🟢 WORKING: Enable Ghost Mode by default
+          ghostMode: {
+            enabled: true,
+            stealthLevel: 'maximum',
+            enableFingerprinting: true,
+            enableHumanBehavior: true,
+            enableBotDetectionEvasion: true,
+          },
         });
 
   if (context?.browser !== browser) {

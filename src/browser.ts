@@ -16,6 +16,7 @@ import type {
   Target,
 } from './third_party/index.js';
 import {puppeteer} from './third_party/index.js';
+import {applyGhostMode, type GhostModeConfig} from './ghost-mode.js';
 
 let browser: Browser | undefined;
 
@@ -144,6 +145,7 @@ interface McpLaunchOptions {
   };
   args?: string[];
   devtools: boolean;
+  ghostMode?: Partial<GhostModeConfig>;
 }
 
 export async function launch(options: McpLaunchOptions): Promise<Browser> {
@@ -197,6 +199,13 @@ export async function launch(options: McpLaunchOptions): Promise<Browser> {
       acceptInsecureCerts: options.acceptInsecureCerts,
       handleDevToolsAsPage: true,
     });
+
+    // 🟢 WORKING: Apply Ghost Mode stealth features
+    if (options.ghostMode) {
+      await applyGhostMode(browser, options.ghostMode);
+      logger('Ghost Mode applied with config:', options.ghostMode);
+    }
+
     if (options.logFile) {
       // FIXME: we are probably subscribing too late to catch startup logs. We
       // should expose the process earlier or expose the getRecentLogs() getter.
