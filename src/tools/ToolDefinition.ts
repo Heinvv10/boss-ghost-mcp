@@ -34,7 +34,7 @@ export interface ToolDefinition<
 }
 
 export interface Request<Schema extends zod.ZodRawShape> {
-  params: zod.objectOutputType<Schema, zod.ZodTypeAny>;
+  params: zod.infer<zod.ZodObject<Schema>>;
 }
 
 export interface ImageContentData {
@@ -133,11 +133,11 @@ export const timeoutSchema = {
   timeout: zod
     .number()
     .int()
-    .optional()
     .describe(
       `Maximum wait time in milliseconds. If set to 0, the default timeout will be used.`,
     )
     .transform(value => {
       return value && value <= 0 ? undefined : value;
-    }),
+    })
+    .optional(),
 };
