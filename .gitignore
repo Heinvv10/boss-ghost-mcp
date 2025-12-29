@@ -141,7 +141,6 @@ dist
 .pnp.*
 
 # Build output directory
-build/
 
 log.txt
 
