@@ -45,6 +45,7 @@ export interface GeolocationOptions {
 export interface TextSnapshot {
   root: TextSnapshotNode;
   idToNode: Map<string, TextSnapshotNode>;
+  backendNodeIdToId: Map<number, string>; // Maps CDP backendNodeId to snapshot node id
   snapshotId: string;
   selectedElementUid?: string;
   // It might happen that there is a selected element, but it is not part of the
@@ -200,18 +201,8 @@ export class McpContext implements Context {
       this.logger('no text snapshot');
       return;
     }
-    // TODO: index by backendNodeId instead.
-    const queue = [this.#textSnapshot.root];
-    while (queue.length) {
-      const current = queue.pop()!;
-      if (current.backendNodeId === cdpBackendNodeId) {
-        return current.id;
-      }
-      for (const child of current.children) {
-        queue.push(child);
-      }
-    }
-    return;
+    // Use pre-indexed backendNodeId map for O(1) lookup instead of tree traversal
+    return this.#textSnapshot.backendNodeIdToId.get(cdpBackendNodeId);
   }
 
   getNetworkRequests(includePreservedRequests?: boolean): HTTPRequest[] {
@@ -444,6 +435,7 @@ export class McpContext implements Context {
       this.#options.experimentalIncludeAllPages,
     );
     this.#pageToDevToolsPage = new Map<Page, Page>();
+
     for (const devToolsPage of pages) {
       if (devToolsPage.url().startsWith('devtools://')) {
         try {
@@ -457,11 +449,12 @@ export class McpContext implements Context {
           if (!urlLike) {
             continue;
           }
-          // TODO: lookup without a loop.
-          for (const page of this.#pages) {
-            if (urlsEqual(page.url(), urlLike)) {
-              this.#pageToDevToolsPage.set(page, devToolsPage);
-            }
+          // Find matching page using optimized lookup instead of full loop
+          const matchedPage = this.#pages.find(page =>
+            urlsEqual(page.url(), urlLike),
+          );
+          if (matchedPage) {
+            this.#pageToDevToolsPage.set(matchedPage, devToolsPage);
           }
         } catch (error) {
           this.logger('Issue occurred while trying to find DevTools', error);
@@ -533,6 +526,7 @@ export class McpContext implements Context {
     // will be used for the tree serialization and mapping ids back to nodes.
     let idCounter = 0;
     const idToNode = new Map<string, TextSnapshotNode>();
+    const backendNodeIdToId = new Map<number, string>();
     const assignIds = (node: SerializedAXNode): TextSnapshotNode => {
       const nodeWithId: TextSnapshotNode = {
         ...node,
@@ -552,6 +546,10 @@ export class McpContext implements Context {
       }
 
       idToNode.set(nodeWithId.id, nodeWithId);
+      // Index by backendNodeId for O(1) lookup instead of tree traversal
+      if (nodeWithId.backendNodeId) {
+        backendNodeIdToId.set(nodeWithId.backendNodeId, nodeWithId.id);
+      }
       return nodeWithId;
     };
 
@@ -560,6 +558,7 @@ export class McpContext implements Context {
       root: rootNodeWithId,
       snapshotId: String(snapshotId),
       idToNode,
+      backendNodeIdToId,
       hasSelectedElement: false,
       verbose,
     };

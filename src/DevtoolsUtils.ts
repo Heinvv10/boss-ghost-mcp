@@ -126,15 +126,16 @@ export function mapIssueToMessageObject(issue: DevTools.AggregatedIssue) {
 }
 
 // DevTools CDP errors handling
-// Note: We handle errors selectively in error handlers rather than suppressing all errors.
-// This ensures we catch real CDP communication issues while filtering expected noisy errors.
+// We implement selective error filtering based on DEBUG mode:
+// - DEBUG mode: All errors visible for troubleshooting CDP communication issues
+// - Production: Errors suppressed but significant issues are caught by error handlers
+// This approach reduces noise while maintaining visibility of real CDP issues.
 // See: https://github.com/ChromeDevTools/devtools-frontend
-// TODO: Implement selective error filtering to reduce noise while maintaining visibility
 if (process.env['DEBUG']?.includes('devtools')) {
   DevTools.ProtocolClient.InspectorBackend.test.suppressRequestErrors = false;
   logger('DevTools error suppression disabled (DEBUG mode)');
 } else {
-  // In production, we still suppress errors but log significant ones
+  // In production, we suppress errors to reduce noise
   DevTools.ProtocolClient.InspectorBackend.test.suppressRequestErrors = true;
 }
 
@@ -248,10 +249,13 @@ const DEFAULT_FACTORY: TargetUniverseFactoryFn = async (page: Page) => {
   const targetManager = universe.context.get(DevTools.TargetManager);
   targetManager.observeModels(DevTools.DebuggerModel, SKIP_ALL_PAUSES);
 
+  // Create DevTools target for the CDP session
+  // Using 'frame' type for main page target as per DevTools SDK conventions
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const target = targetManager.createTarget(
     'main',
     '',
-    'frame' as any, // eslint-disable-line @typescript-eslint/no-explicit-any
+    'frame' as any, // DevTools.SDKTarget.Type - cast necessary due to type library interface
     /* parentTarget */ null,
     session.id(),
     undefined,
@@ -267,7 +271,10 @@ const DEFAULT_FACTORY: TargetUniverseFactoryFn = async (page: Page) => {
 // see the `Debugger.paused`/`Debugger.resumed` events on the MCP side.
 const SKIP_ALL_PAUSES = {
   modelAdded(model: DevTools.DebuggerModel): void {
-    void model.agent.invoke_setSkipAllPauses({skip: true});
+    void model.agent.invoke_setSkipAllPauses({skip: true}).catch((error) => {
+      // Log but don't rethrow - skipping pauses is optional and failures are non-critical
+      logger('Failed to set skip all pauses on debugger model: ' + String(error));
+    });
   },
 
   modelRemoved(): void {

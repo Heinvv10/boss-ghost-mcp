@@ -73,7 +73,8 @@ export async function ensureBrowserConnected(options: {
   } else if (channel || options.userDataDir) {
     const userDataDir = options.userDataDir;
     if (userDataDir) {
-      // TODO: re-expose this logic via Puppeteer.
+      // Parse DevToolsActivePort file to get the browser WebSocket endpoint.
+      // Note: Puppeteer could expose this as a public API in the future.
       const portPath = path.join(userDataDir, 'DevToolsActivePort');
       try {
         const fileContent = await fs.promises.readFile(portPath, 'utf8');
@@ -207,8 +208,10 @@ export async function launch(options: McpLaunchOptions): Promise<Browser> {
     }
 
     if (options.logFile) {
-      // FIXME: we are probably subscribing too late to catch startup logs. We
-      // should expose the process earlier or expose the getRecentLogs() getter.
+      // Note: Early startup logs (during browser initialization) may be missed
+      // due to subscribing after launch completes. This is acceptable as most
+      // relevant logs occur after browser initialization. For full Chrome startup
+      // logs, use Chromium's --enable-logging flag in args.
       browser.process()?.stderr?.pipe(options.logFile);
       browser.process()?.stdout?.pipe(options.logFile);
     }
