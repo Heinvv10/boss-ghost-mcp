@@ -90,7 +90,15 @@ export class PageCollector<T> {
       }
       this.addPage(page);
     } catch (err) {
-      logger('Error getting a page for a target onTargetCreated', err);
+      // Error context: Failed to initialize page from target.
+      // This is a recoverable error - the target may be non-page or transient.
+      // Logging with full context for debugging long-running sessions.
+      const targetType = (target as any).type?.() || 'unknown';
+      const targetUrl = (target as any).url?.() || 'unknown';
+      logger(
+        `Error initializing page from target [type=${targetType}, url=${targetUrl}]: ${err}`,
+        err,
+      );
     }
   };
 
@@ -102,7 +110,15 @@ export class PageCollector<T> {
       }
       this.cleanupPageDestroyed(page);
     } catch (err) {
-      logger('Error getting a page for a target onTargetDestroyed', err);
+      // Error context: Failed to cleanup page from destroyed target.
+      // This is a recoverable error - the page/target may have already been cleaned up.
+      // Logging with context to aid debugging of cleanup failures.
+      const targetType = (target as any).type?.() || 'unknown';
+      const targetUrl = (target as any).url?.() || 'unknown';
+      logger(
+        `Error cleaning up page from destroyed target [type=${targetType}, url=${targetUrl}]: ${err}`,
+        err,
+      );
     }
   };
 
@@ -228,7 +244,9 @@ export class ConsoleCollector extends PageCollector<
     if (!this.#subscribedPages.has(page)) {
       const subscriber = new PageIssueSubscriber(page);
       this.#subscribedPages.set(page, subscriber);
-      void subscriber.subscribe();
+      void subscriber.subscribe().catch((error) => {
+        logger('Error subscribing to page issues', error);
+      });
     }
   }
 
@@ -294,7 +312,7 @@ class PageIssueSubscriber {
       // Audits.disable might fail if session is already closed
       // This is expected during page cleanup, so we log at debug level
       if (!(error instanceof Error && error.message.includes('Target closed'))) {
-        this.logger('Failed to disable audits during cleanup', error);
+        logger('Failed to disable audits during cleanup', error);
       }
     });
   }
