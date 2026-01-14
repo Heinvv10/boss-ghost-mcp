@@ -125,8 +125,18 @@ export function mapIssueToMessageObject(issue: DevTools.AggregatedIssue) {
   };
 }
 
-// DevTools CDP errors can get noisy.
-DevTools.ProtocolClient.InspectorBackend.test.suppressRequestErrors = true;
+// DevTools CDP errors handling
+// Note: We handle errors selectively in error handlers rather than suppressing all errors.
+// This ensures we catch real CDP communication issues while filtering expected noisy errors.
+// See: https://github.com/ChromeDevTools/devtools-frontend
+// TODO: Implement selective error filtering to reduce noise while maintaining visibility
+if (process.env['DEBUG']?.includes('devtools')) {
+  DevTools.ProtocolClient.InspectorBackend.test.suppressRequestErrors = false;
+  logger('DevTools error suppression disabled (DEBUG mode)');
+} else {
+  // In production, we still suppress errors but log significant ones
+  DevTools.ProtocolClient.InspectorBackend.test.suppressRequestErrors = true;
+}
 
 DevTools.I18n.DevToolsLocale.DevToolsLocale.instance({
   create: true,

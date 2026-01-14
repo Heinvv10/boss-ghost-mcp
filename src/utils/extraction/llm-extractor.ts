@@ -7,6 +7,7 @@
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 import type {Page, zod} from '../../third_party/index.js';
+import {logger} from '../../logger.js';
 
 /**
  * LLM-based data extraction with cascading providers
@@ -76,14 +77,13 @@ export class LlmExtractor {
     // Attempt 1: OpenAI GPT-4o-mini (primary)
     if (this.openaiClient) {
       try {
-        console.log('[LLM] Attempting extraction with OpenAI GPT-4o-mini...');
+        logger('[LLM] Attempting extraction with OpenAI GPT-4o-mini');
         result = await this.extractWithOpenAI(prompt, schema);
-        console.log('[LLM] ✅ OpenAI extraction successful');
+        logger('[LLM] OpenAI extraction successful');
         return result;
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
-        console.log(`[LLM] ⚠️ OpenAI extraction failed: ${lastError.message}`);
-        console.log('[LLM] 🔄 Falling back to Claude Haiku...');
+        logger(`[LLM] OpenAI extraction failed, falling back to Claude: ${lastError.message}`);
       }
     }
 
@@ -91,11 +91,11 @@ export class LlmExtractor {
     if (this.claudeClient) {
       try {
         result = await this.extractWithClaude(prompt, schema);
-        console.log('[LLM] ✅ Claude extraction successful (fallback)');
+        logger('[LLM] Claude extraction successful (fallback)');
         return result;
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
-        console.log(`[LLM] ❌ Claude extraction failed: ${lastError.message}`);
+        logger(`[LLM] Claude extraction failed: ${lastError.message}`);
       }
     }
 

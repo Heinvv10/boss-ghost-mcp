@@ -290,8 +290,12 @@ class PageIssueSubscriber {
         this.#onAggregatedissue,
       );
     }
-    void this.#session.send('Audits.disable').catch(() => {
-      // might fail.
+    void this.#session.send('Audits.disable').catch((error) => {
+      // Audits.disable might fail if session is already closed
+      // This is expected during page cleanup, so we log at debug level
+      if (!(error instanceof Error && error.message.includes('Target closed'))) {
+        this.logger('Failed to disable audits during cleanup', error);
+      }
     });
   }
 
