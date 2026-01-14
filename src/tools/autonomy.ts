@@ -312,6 +312,8 @@ export const waitForCaptchaSolved = defineTool({
     try {
       // Create a minimal CaptchaDetection object for waitForSolution
       const captchaDetection = {
+        // Type assertion: request.params.captchaType is a string, but CaptchaDetection.type expects
+        // a specific enum. We convert the string value to the expected type at this integration point.
         type: request.params.captchaType as any,
         confidence: 1.0,
         element: null,
@@ -367,7 +369,9 @@ export const smartClickElement = defineTool({
 
       if (result.element) {
         await result.element.click();
-        void result.element.dispose();
+        void result.element.dispose().catch(() => {
+          // Ignore cleanup errors - element may already be disposed
+        });
 
         if (result.strategy) {
           response.appendResponseLine(`[SMART_CLICK] Success using strategy: ${result.strategy.name}`);

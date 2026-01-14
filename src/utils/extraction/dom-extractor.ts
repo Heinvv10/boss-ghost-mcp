@@ -5,6 +5,7 @@
  */
 
 import type {Page, zod} from '../../third_party/index.js';
+import type {ZodObjectSchema, ExtractionResult} from '../../types/zod-schemas.js';
 
 /**
  * DOM-based data extraction using selector patterns
@@ -16,9 +17,9 @@ export class DomExtractor {
    */
   async extract(
     page: Page,
-    schema: zod.ZodObject<any>,
+    schema: ZodObjectSchema,
     selector?: string,
-  ): Promise<any> {
+  ): Promise<ExtractionResult> {
     const scope = selector || 'document';
 
     // Get schema shape to understand expected fields
@@ -27,6 +28,9 @@ export class DomExtractor {
     // Extract type information before page.evaluate (can't serialize Zod schemas)
     const fieldTypes: Record<string, { type: string; elementType?: string }> = {};
     for (const [fieldName, fieldSchema] of Object.entries(schemaShape)) {
+      // Type assertion: Accessing Zod's internal _def property to introspect schema structure.
+      // The _def property is not exposed in Zod's public TypeScript types but is necessary for
+      // extracting type information before serializing schemas for browser evaluation.
       const def = (fieldSchema as any)._def;
       const type = def.type;
 
@@ -103,7 +107,7 @@ export class DomExtractor {
           ];
 
           // Try each selector
-          let value: any = null;
+          let value: string | string[] | number | number[] | boolean | boolean[] | null = null;
           for (const sel of selectors) {
             // Handle array types (Zod v4 uses lowercase type names)
             if (fieldType === 'array') {
