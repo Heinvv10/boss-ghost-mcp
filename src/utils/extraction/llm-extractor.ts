@@ -8,6 +8,15 @@ import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 import type {Page, zod} from '../../third_party/index.js';
 import {logger} from '../../logger.js';
+import type {
+  ZodObjectSchema,
+  ExtractionResult,
+  ZodSchemaDef,
+} from '../../types/zod-schemas.js';
+import {
+  getZodTypeDef,
+  describeZodSchema,
+} from '../../types/zod-schemas.js';
 
 /**
  * LLM-based data extraction with cascading providers
@@ -34,7 +43,7 @@ export class LlmExtractor {
     // Require at least one provider
     if (!this.openaiClient && !this.claudeClient) {
       throw new Error(
-        'At least one API key required: OPENAI_API_KEY (primary) or ANTHROPIC_API_KEY (fallback)'
+        'LLM extraction requires at least one API provider to be configured. Please set up OpenAI or Anthropic credentials.'
       );
     }
   }
@@ -46,10 +55,10 @@ export class LlmExtractor {
    */
   async extract(
     page: Page,
-    schema: zod.ZodObject<any>,
+    schema: ZodObjectSchema,
     instructions?: string,
     selector?: string,
-  ): Promise<any> {
+  ): Promise<ExtractionResult> {
     // Get HTML content
     let htmlContent: string;
     if (selector) {
@@ -71,7 +80,7 @@ export class LlmExtractor {
     // Construct extraction prompt
     const prompt = this.buildPrompt(schemaDescription, instructions, cleanedHtml);
 
-    let result: any;
+    let result: ExtractionResult | null = null;
     let lastError: Error | null = null;
 
     // Attempt 1: OpenAI GPT-4o-mini (primary)
@@ -103,6 +112,7 @@ export class LlmExtractor {
     throw new Error(
       `LLM extraction failed with all providers. Last error: ${lastError?.message || 'Unknown error'}`
     );
+    // Note: TypeScript ensures result is non-null before reaching return statements above
   }
 
   /**
@@ -110,8 +120,8 @@ export class LlmExtractor {
    */
   private async extractWithOpenAI(
     prompt: string,
-    schema: zod.ZodObject<any>,
-  ): Promise<any> {
+    schema: ZodObjectSchema,
+  ): Promise<ExtractionResult> {
     if (!this.openaiClient) {
       throw new Error('OpenAI client not initialized');
     }
@@ -133,8 +143,17 @@ export class LlmExtractor {
     }
 
     // Parse and validate JSON
-    const extracted = JSON.parse(content);
-    return schema.parse(extracted);
+    try {
+      const extracted = JSON.parse(content);
+      return schema.parse(extracted);
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        throw new Error(`Failed to parse OpenAI JSON response: Invalid JSON format (${error.message})`);
+      }
+      throw new Error(
+        `Failed to validate OpenAI response against schema: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
   }
 
   /**
@@ -142,8 +161,8 @@ export class LlmExtractor {
    */
   private async extractWithClaude(
     prompt: string,
-    schema: zod.ZodObject<any>,
-  ): Promise<any> {
+    schema: ZodObjectSchema,
+  ): Promise<ExtractionResult> {
     if (!this.claudeClient) {
       throw new Error('Claude client not initialized');
     }
@@ -168,8 +187,18 @@ export class LlmExtractor {
       throw new Error('No JSON found in Claude response');
     }
 
-    const extracted = JSON.parse(jsonMatch[0]);
-    return schema.parse(extracted);
+    // Parse and validate JSON
+    try {
+      const extracted = JSON.parse(jsonMatch[0]);
+      return schema.parse(extracted);
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        throw new Error(`Failed to parse Claude JSON response: Invalid JSON format (${error.message})`);
+      }
+      throw new Error(
+        `Failed to validate Claude response against schema: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
   }
 
   /**
@@ -218,40 +247,9 @@ ${htmlContent}`;
 
   /**
    * Generate human-readable schema description for LLMs
+   * Uses type-safe helper from zod-schemas module
    */
-  private describeSchema(schema: zod.ZodObject<any>): string {
-    const shape = schema.shape;
-    const fields: string[] = [];
-
-    for (const [fieldName, fieldSchema] of Object.entries(shape)) {
-      const def = (fieldSchema as any)._def;
-      // Zod v4 uses _def.type instead of _def.typeName
-      const type = def.type;
-      const isOptional = type === 'optional';
-
-      let typeDesc = '';
-      if (type === 'string') {
-        typeDesc = 'string';
-      } else if (type === 'number') {
-        typeDesc = 'number';
-      } else if (type === 'boolean') {
-        typeDesc = 'boolean';
-      } else if (type === 'array') {
-        const innerType = def.element?._def?.type || 'unknown';
-        typeDesc = `array of ${innerType}s`;
-      } else if (type === 'object') {
-        typeDesc = 'object';
-      } else if (type === 'optional') {
-        const innerDef = def.innerType?._def;
-        const innerType = innerDef?.type || 'unknown';
-        typeDesc = `optional ${innerType}`;
-      } else {
-        typeDesc = type || 'unknown';
-      }
-
-      fields.push(`  - ${fieldName}: ${typeDesc}${isOptional ? ' (optional)' : ''}`);
-    }
-
-    return fields.join('\n');
+  private describeSchema(schema: ZodObjectSchema): string {
+    return describeZodSchema(schema);
   }
 }

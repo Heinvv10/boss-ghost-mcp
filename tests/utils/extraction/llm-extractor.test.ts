@@ -410,9 +410,9 @@ describe('LlmExtractor', () => {
         const result = await extractor.extract(page, schema);
 
         assert.equal(result.title, 'Job Listings');
-        assert.equal(result.jobs.length, 2);
-        assert.equal(result.jobs[0], 'Software Engineer - Remote');
-        assert.equal(result.jobs[1], 'Product Manager - NYC');
+        assert.equal((result.jobs as any[]).length, 2);
+        assert.equal((result.jobs as any[])[0], 'Software Engineer - Remote');
+        assert.equal((result.jobs as any[])[1], 'Product Manager - NYC');
       });
     });
   });
@@ -558,10 +558,154 @@ describe('LlmExtractor', () => {
         await assert.rejects(
           async () => await extractor.extract(page, schema),
           {
-            name: 'ZodError',
+            message: /LLM extraction failed|validation failed|Invalid input/i,
           }
         );
       });
+    });
+  });
+
+  describe('JSON parsing errors', () => {
+    it('should handle invalid JSON from OpenAI', async () => {
+      process.env.OPENAI_API_KEY = 'test-openai-key';
+
+      await withMcpContext(async (_response, context) => {
+        const page = context.getSelectedPage();
+
+        await page.setContent(html`<main><h1>Test</h1></main>`);
+
+        const schema = zod.object({
+          title: zod.string(),
+        });
+
+        const extractor = new LlmExtractor();
+
+        // Mock OpenAI to return invalid JSON
+        const mockOpenAI = {
+          chat: {
+            completions: {
+              create: sinon.stub().resolves({
+                choices: [{
+                  message: {
+                    content: '{invalid json}',
+                  },
+                }],
+              }),
+            },
+          },
+        };
+
+        (extractor as any).openaiClient = mockOpenAI;
+
+        await assert.rejects(
+          async () => await extractor.extract(page, schema),
+          {
+            message: /Failed to parse OpenAI JSON response|Invalid JSON format/i,
+          }
+        );
+      });
+    });
+
+    it('should handle invalid JSON from Claude', async () => {
+      delete process.env.OPENAI_API_KEY;
+      process.env.ANTHROPIC_API_KEY = 'test-anthropic-key';
+
+      await withMcpContext(async (_response, context) => {
+        const page = context.getSelectedPage();
+
+        await page.setContent(html`<main><h1>Test</h1></main>`);
+
+        const schema = zod.object({
+          title: zod.string(),
+        });
+
+        const extractor = new LlmExtractor();
+
+        // Mock Claude to return invalid JSON
+        const mockClaude = {
+          messages: {
+            create: sinon.stub().resolves({
+              content: [{
+                type: 'text',
+                text: 'Some text with broken json: {invalid}',
+              }],
+            }),
+          },
+        };
+
+        (extractor as any).claudeClient = mockClaude;
+
+        await assert.rejects(
+          async () => await extractor.extract(page, schema),
+          {
+            message: /Failed to parse Claude JSON response|Invalid JSON format/i,
+          }
+        );
+      });
+    });
+
+    it('should handle JSON parse error with proper error message', async () => {
+      process.env.OPENAI_API_KEY = 'test-openai-key';
+
+      await withMcpContext(async (_response, context) => {
+        const page = context.getSelectedPage();
+
+        await page.setContent(html`<main><h1>Test</h1></main>`);
+
+        const schema = zod.object({
+          title: zod.string(),
+        });
+
+        const extractor = new LlmExtractor();
+
+        // Mock OpenAI to return JSON with syntax error
+        const mockOpenAI = {
+          chat: {
+            completions: {
+              create: sinon.stub().resolves({
+                choices: [{
+                  message: {
+                    content: '{"title": "Test",}', // Trailing comma is invalid JSON
+                  },
+                }],
+              }),
+            },
+          },
+        };
+
+        (extractor as any).openaiClient = mockOpenAI;
+
+        await assert.rejects(
+          async () => await extractor.extract(page, schema),
+          {
+            message: /Failed to parse|Invalid JSON/i,
+          }
+        );
+      });
+    });
+  });
+
+  describe('error message security', () => {
+    it('should not expose environment variable names in error messages', () => {
+      delete process.env.OPENAI_API_KEY;
+      delete process.env.ANTHROPIC_API_KEY;
+
+      let thrownError: Error | null = null;
+      try {
+        new LlmExtractor();
+      } catch (e) {
+        thrownError = e as Error;
+      }
+
+      assert.ok(thrownError !== null, 'Expected LlmExtractor to throw when no API keys are set');
+
+      // Verify error message does NOT contain environment variable names
+      assert.ok(!thrownError.message.includes('OPENAI_API_KEY'));
+      assert.ok(!thrownError.message.includes('ANTHROPIC_API_KEY'));
+
+      // Verify error message is generic and helpful
+      assert.ok(thrownError.message.includes('LLM extraction requires'));
+      assert.ok(thrownError.message.includes('API provider'));
     });
   });
 });

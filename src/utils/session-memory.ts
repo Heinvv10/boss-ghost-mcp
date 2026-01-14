@@ -6,6 +6,7 @@
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import {logger} from '../logger.js';
 import type {Page} from '../third_party/index.js';
 
 /**
@@ -48,6 +49,21 @@ export interface SessionMemory {
   sessionStorage?: Record<string, string>;
   htmlContent?: string; // ✅ Store HTML content for full restoration
 }
+
+/**
+ * Memory limits for session data to prevent unbounded growth
+ * These limits ensure long-running sessions don't exhaust memory
+ */
+export const SESSION_MEMORY_LIMITS = {
+  /** Maximum element cache entries per session */
+  MAX_ELEMENT_CACHE_SIZE: 500,
+  /** Maximum navigation history entries */
+  MAX_NAVIGATION_HISTORY: 100,
+  /** Maximum form data entries */
+  MAX_FORM_DATA_ENTRIES: 200,
+  /** Maximum HTML content size in bytes (5MB) */
+  MAX_HTML_CONTENT_SIZE: 5 * 1024 * 1024,
+} as const;
 
 /**
  * Session Memory Manager
@@ -99,7 +115,7 @@ export class SessionMemoryManager {
     try {
       await fs.mkdir(this.storageDir, {recursive: true});
     } catch (error) {
-      console.error('[SESSION] Failed to create storage directory:', error);
+      logger('[SESSION] Failed to create storage directory: ' + String(error));
       throw error;
     }
   }
@@ -140,6 +156,9 @@ export class SessionMemoryManager {
       lastUpdate: memory.lastUpdate !== undefined ? memory.lastUpdate : Date.now(),
     };
 
+    // ✅ Apply memory limits to prevent unbounded growth in long-running sessions
+    this.applyMemoryLimits(updated);
+
     // Convert Map to object for JSON serialization
     const serializable = {
       ...updated,
@@ -148,7 +167,7 @@ export class SessionMemoryManager {
 
     const filePath = this.getSessionPath(sessionId);
     await fs.writeFile(filePath, JSON.stringify(serializable, null, 2), 'utf-8');
-    console.log(`[SESSION] Saved session ${sessionId} to ${filePath}`);
+    logger('[SESSION] Saved session ' + sessionId + ' to ' + filePath);
   }
 
   /**
@@ -168,11 +187,16 @@ export class SessionMemoryManager {
       parsed.elementCache = new Map(parsed.elementCache || []);
 
       return parsed as SessionMemory;
-    } catch (error: any) {
-      if (error.code === 'ENOENT') {
+    } catch (error) {
+      // Type-safe error handling for NodeJS file system errors
+      if (
+        error instanceof Error &&
+        'code' in error &&
+        (error as any).code === 'ENOENT'
+      ) {
         return null; // Session not found
       }
-      console.error(`[SESSION] Failed to load session ${sessionId}:`, error);
+      logger('[SESSION] Failed to load session ' + sessionId + ': ' + String(error));
       throw error;
     }
   }
@@ -187,12 +211,20 @@ export class SessionMemoryManager {
 
     try {
       await fs.unlink(filePath);
-      console.log(`[SESSION] Deleted session ${sessionId}`);
-    } catch (error: any) {
-      if (error.code !== 'ENOENT') {
-        console.error(`[SESSION] Failed to delete session ${sessionId}:`, error);
+      logger('[SESSION] Deleted session ' + sessionId);
+    } catch (error) {
+      // Type-safe error handling for NodeJS file system errors
+      if (
+        !(
+          error instanceof Error &&
+          'code' in error &&
+          (error as any).code === 'ENOENT'
+        )
+      ) {
+        logger('[SESSION] Failed to delete session ' + sessionId + ': ' + String(error));
         throw error;
       }
+      // ENOENT is silently ignored (session already doesn't exist)
     }
   }
 
@@ -210,7 +242,7 @@ export class SessionMemoryManager {
         .filter(file => file.endsWith('.json'))
         .map(file => file.replace('.json', ''));
     } catch (error) {
-      console.error('[SESSION] Failed to list sessions:', error);
+      logger('[SESSION] Failed to list sessions: ' + String(error));
       return [];
     }
   }
@@ -224,7 +256,7 @@ export class SessionMemoryManager {
   async saveCookies(sessionId: string, page: Page): Promise<void> {
     const cookies = await page.cookies();
     await this.save(sessionId, {cookies});
-    console.log(`[SESSION] Saved ${cookies.length} cookies for ${sessionId}`);
+    logger('[SESSION] Saved ' + cookies.length + ' cookies for ' + sessionId);
   }
 
   /**
@@ -237,9 +269,7 @@ export class SessionMemoryManager {
     const session = await this.load(sessionId);
     if (session?.cookies) {
       await page.setCookie(...session.cookies);
-      console.log(
-        `[SESSION] Loaded ${session.cookies.length} cookies for ${sessionId}`,
-      );
+      logger('[SESSION] Loaded ' + session.cookies.length + ' cookies for ' + sessionId);
     }
   }
 
@@ -262,9 +292,7 @@ export class SessionMemoryManager {
     });
 
     await this.save(sessionId, {localStorage});
-    console.log(
-      `[SESSION] Saved ${Object.keys(localStorage).length} localStorage items for ${sessionId}`,
-    );
+    logger('[SESSION] Saved ' + Object.keys(localStorage).length + ' localStorage items for ' + sessionId);
   }
 
   /**
@@ -282,9 +310,7 @@ export class SessionMemoryManager {
         }
       }, session.localStorage);
 
-      console.log(
-        `[SESSION] Loaded ${Object.keys(session.localStorage).length} localStorage items for ${sessionId}`,
-      );
+      logger('[SESSION] Loaded ' + Object.keys(session.localStorage).length + ' localStorage items for ' + sessionId);
     }
   }
 
@@ -335,7 +361,7 @@ export class SessionMemoryManager {
     await this.saveCookies(sessionId, page);
     await this.saveLocalStorage(sessionId, page);
 
-    console.log(`[SESSION] Saved complete page state for ${sessionId}`);
+    logger('[SESSION] Saved complete page state for ' + sessionId);
   }
 
   /**
@@ -352,7 +378,7 @@ export class SessionMemoryManager {
   ): Promise<void> {
     const session = await this.load(sessionId);
     if (!session) {
-      console.warn(`[SESSION] No saved state found for ${sessionId}`);
+      logger('[SESSION] No saved state found for ' + sessionId);
       return;
     }
 
@@ -409,7 +435,7 @@ export class SessionMemoryManager {
     if (restoreFormData && session.formData.length > 0) {
       // ✅ Wait for page to be ready before restoring form data
       await page.waitForSelector('body', {timeout: 5000}).catch(() => {
-        console.warn('[SESSION] Page body not ready for form restoration');
+        logger('[SESSION] Page body not ready for form restoration');
       });
 
       // ✅ Restore form data with better error handling
@@ -424,19 +450,15 @@ export class SessionMemoryManager {
           if (element) {
             element.value = entry.value;
             count++;
-          } else {
-            console.warn(`[SESSION] Could not find element for selector: ${entry.selector}`);
           }
         });
         return count;
       }, session.formData);
 
-      console.log(
-        `[SESSION] Restored ${restoredCount}/${session.formData.length} form fields for ${sessionId}`,
-      );
+      logger('[SESSION] Restored ' + restoredCount + '/' + session.formData.length + ' form fields for ' + sessionId);
     }
 
-    console.log(`[SESSION] Restored complete page state for ${sessionId}`);
+    logger('[SESSION] Restored complete page state for ' + sessionId);
   }
 
   /**
@@ -457,7 +479,7 @@ export class SessionMemoryManager {
       }
     }
 
-    console.log(`[SESSION] Cleaned up ${deleted} old sessions`);
+    logger('[SESSION] Cleaned up ' + deleted + ' old sessions');
     return deleted;
   }
 
@@ -473,5 +495,58 @@ export class SessionMemoryManager {
    */
   getStorageDir(): string {
     return this.storageDir;
+  }
+
+  /**
+   * Apply memory limits to session data
+   * Prevents unbounded growth in long-running sessions by trimming
+   * collections to their maximum allowed sizes (oldest entries removed first)
+   *
+   * @param session - Session memory to enforce limits on (modified in place)
+   */
+  private applyMemoryLimits(session: SessionMemory): void {
+    // Limit element cache (remove oldest entries based on timestamp)
+    if (session.elementCache.size > SESSION_MEMORY_LIMITS.MAX_ELEMENT_CACHE_SIZE) {
+      const entries = Array.from(session.elementCache.entries())
+        .sort((a, b) => a[1].timestamp - b[1].timestamp);
+
+      const toRemove = entries.length - SESSION_MEMORY_LIMITS.MAX_ELEMENT_CACHE_SIZE;
+      for (let i = 0; i < toRemove; i++) {
+        session.elementCache.delete(entries[i][0]);
+      }
+
+      logger(
+        `[SESSION] Trimmed element cache from ${entries.length} to ${session.elementCache.size} entries`
+      );
+    }
+
+    // Limit navigation history (keep most recent)
+    if (session.navigationHistory.length > SESSION_MEMORY_LIMITS.MAX_NAVIGATION_HISTORY) {
+      const removed = session.navigationHistory.length - SESSION_MEMORY_LIMITS.MAX_NAVIGATION_HISTORY;
+      session.navigationHistory = session.navigationHistory.slice(-SESSION_MEMORY_LIMITS.MAX_NAVIGATION_HISTORY);
+      logger(`[SESSION] Trimmed navigation history by ${removed} entries`);
+    }
+
+    // Limit form data entries (keep most recent)
+    if (session.formData.length > SESSION_MEMORY_LIMITS.MAX_FORM_DATA_ENTRIES) {
+      const removed = session.formData.length - SESSION_MEMORY_LIMITS.MAX_FORM_DATA_ENTRIES;
+      session.formData = session.formData.slice(-SESSION_MEMORY_LIMITS.MAX_FORM_DATA_ENTRIES);
+      logger(`[SESSION] Trimmed form data by ${removed} entries`);
+    }
+
+    // Limit HTML content size
+    if (
+      session.htmlContent &&
+      session.htmlContent.length > SESSION_MEMORY_LIMITS.MAX_HTML_CONTENT_SIZE
+    ) {
+      logger(
+        `[SESSION] HTML content (${session.htmlContent.length} bytes) exceeds limit ` +
+        `(${SESSION_MEMORY_LIMITS.MAX_HTML_CONTENT_SIZE} bytes), truncating`
+      );
+      session.htmlContent = session.htmlContent.substring(
+        0,
+        SESSION_MEMORY_LIMITS.MAX_HTML_CONTENT_SIZE
+      );
+    }
   }
 }

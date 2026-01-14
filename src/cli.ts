@@ -74,17 +74,54 @@ export const cliOptions = {
       if (!val) {
         return;
       }
+
+      // Parse JSON
+      let parsed: unknown;
       try {
-        const parsed = JSON.parse(val);
-        if (typeof parsed !== 'object' || Array.isArray(parsed)) {
-          throw new Error('Headers must be a JSON object');
-        }
-        return parsed as Record<string, string>;
+        parsed = JSON.parse(val);
       } catch (error) {
         throw new Error(
           `Invalid JSON for wsHeaders: ${(error as Error).message}`,
         );
       }
+
+      // Validate structure: must be object, not array
+      if (typeof parsed !== 'object' || Array.isArray(parsed) || parsed === null) {
+        throw new Error('Headers must be a JSON object');
+      }
+
+      // RFC 7230 token validation for header names
+      const headerNamePattern = /^[!#$%&'*+\-.0-9A-Z^_`a-z|~]+$/;
+      const MAX_HEADER_VALUE_LENGTH = 4096;
+
+      // Validate each header
+      const headers: Record<string, string> = {};
+      for (const [key, value] of Object.entries(parsed)) {
+        // Validate header name (RFC 7230 tokens)
+        if (!headerNamePattern.test(key)) {
+          throw new Error(
+            `Invalid header name "${key}": must contain only RFC 7230 token characters`,
+          );
+        }
+
+        // Validate header value: must be string
+        if (typeof value !== 'string') {
+          throw new Error(
+            `Invalid header value for "${key}": must be a string, got ${typeof value}`,
+          );
+        }
+
+        // Validate header value length
+        if (value.length > MAX_HEADER_VALUE_LENGTH) {
+          throw new Error(
+            `Header value for "${key}" exceeds maximum length of ${MAX_HEADER_VALUE_LENGTH} characters`,
+          );
+        }
+
+        headers[key] = value;
+      }
+
+      return headers;
     },
   },
   headless: {
