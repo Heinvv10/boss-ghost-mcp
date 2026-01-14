@@ -89,9 +89,11 @@ describe('McpContext', () => {
     await withMcpContext(
       async (_response, context) => {
         const page = await context.newPage();
-        // TODO: we do not know when the CLI flag to auto open DevTools will run
-        // so we need this until
-        // https://github.com/puppeteer/puppeteer/issues/14368 is there.
+        // Note: DevTools page initialization timing
+        // The autoOpenDevTools CLI flag launches DevTools asynchronously.
+        // We wait to ensure Puppeteer has detected and initialized the DevTools page.
+        // See: https://github.com/puppeteer/puppeteer/issues/14368
+        // This polling approach is necessary until Puppeteer provides a detection event.
         await new Promise(resolve => setTimeout(resolve, 5000));
         await context.createPagesSnapshot();
         assert.ok(context.getDevToolsPage(page));
