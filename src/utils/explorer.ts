@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {logger} from '../logger.js';
 import type {Page} from '../third_party/index.js';
 
 /**
@@ -109,6 +110,8 @@ export class AutonomousExplorer {
   private queue: Array<{url: string; depth: number}> = [];
   private sitemap: Map<string, PageInfo> = new Map();
   private allErrors: ConsoleError[] = [];
+  private maxQueueSize = 1000; // Prevent unbounded queue growth
+  private maxErrorsSize = 500; // Limit error tracking
 
   /**
    * Explore a website starting from a URL
@@ -135,10 +138,8 @@ export class AutonomousExplorer {
       ...config,
     };
 
-    console.log(`[EXPLORER] Starting exploration from ${startUrl}`);
-    console.log(
-      `[EXPLORER] Config: maxDepth=${fullConfig.maxDepth}, maxPages=${fullConfig.maxPages}`,
-    );
+    logger('[EXPLORER] Starting exploration from ' + startUrl);
+    logger('[EXPLORER] Config: maxDepth=' + fullConfig.maxDepth + ', maxPages=' + fullConfig.maxPages);
 
     const startTime = Date.now();
 
@@ -161,13 +162,13 @@ export class AutonomousExplorer {
 
       // Skip if max depth exceeded
       if (depth > fullConfig.maxDepth) {
-        console.log(`[EXPLORER] Max depth reached for ${url}`);
+        logger('[EXPLORER] Max depth reached for ' + url);
         continue;
       }
 
       // Skip if URL matches ignore patterns
       if (this.shouldIgnoreUrl(url, fullConfig.ignorePatterns)) {
-        console.log(`[EXPLORER] Ignoring ${url} (matches ignore pattern)`);
+        logger('[EXPLORER] Ignoring ' + url + ' (matches ignore pattern)');
         continue;
       }
 
@@ -175,15 +176,13 @@ export class AutonomousExplorer {
       if (!fullConfig.followExternal) {
         const urlDomain = new URL(url).hostname;
         if (urlDomain !== startDomain) {
-          console.log(`[EXPLORER] Skipping external link: ${url}`);
+          logger('[EXPLORER] Skipping external link: ' + url);
           continue;
         }
       }
 
       // Visit page
-      console.log(
-        `[EXPLORER] Visiting [${this.visited.size + 1}/${fullConfig.maxPages}] ${url} (depth ${depth})`,
-      );
+      logger('[EXPLORER] Visiting [' + (this.visited.size + 1) + '/' + fullConfig.maxPages + '] ' + url + ' (depth ' + depth + ')');
 
       try {
         const pageInfo = await this.visitPage(page, url, depth, fullConfig);
@@ -195,23 +194,29 @@ export class AutonomousExplorer {
           this.visited.add(pageInfo.url);
         }
 
-        // Collect errors
-        this.allErrors.push(...pageInfo.errors);
+        // Collect errors (enforce size limit)
+        if (this.allErrors.length < this.maxErrorsSize) {
+          this.allErrors.push(...pageInfo.errors.slice(0, this.maxErrorsSize - this.allErrors.length));
+        }
 
-        // Add links to queue for next depth level
+        // Add links to queue for next depth level (enforce size limit)
         for (const link of pageInfo.links) {
+          if (this.queue.length >= this.maxQueueSize) break;
           if (!this.visited.has(link) && !this.queue.some(item => item.url === link)) {
             this.queue.push({url: link, depth: depth + 1});
           }
         }
       } catch (error) {
-        console.error(`[EXPLORER] Failed to visit ${url}:`, error);
-        this.allErrors.push({
-          message: `Failed to load: ${(error as Error).message}`,
-          type: 'error',
-          timestamp: Date.now(),
-          url,
-        });
+        logger('[EXPLORER] Failed to visit ' + url + ': ' + String(error));
+        // Enforce error array size limit
+        if (this.allErrors.length < this.maxErrorsSize) {
+          this.allErrors.push({
+            message: `Failed to load: ${(error as Error).message}`,
+            type: 'error',
+            timestamp: Date.now(),
+            url,
+          });
+        }
       }
     }
 
@@ -226,9 +231,7 @@ export class AutonomousExplorer {
       allForms.push(...pageInfo.forms);
     }
 
-    console.log(
-      `[EXPLORER] Exploration complete: ${this.visited.size} pages in ${explorationTime}ms`,
-    );
+    logger('[EXPLORER] Exploration complete: ' + this.visited.size + ' pages in ' + explorationTime + 'ms');
 
     return {
       sitemap: this.sitemap,
@@ -292,7 +295,7 @@ export class AutonomousExplorer {
       page.on('console', consoleListener);
       page.on('pageerror', pageErrorListener);
     }
-    let response = null;
+    let response: any = null; // DevTools Response type - dynamic at runtime
     let status = 200; // Default to 200 for pre-loaded pages
 
     // Normalize URLs for comparison (handle trailing slashes)
@@ -324,7 +327,7 @@ export class AutonomousExplorer {
     } else {
       // Skip navigation to preserve pre-loaded test content
       // But reload the HTML to retrigger scripts with our error listeners active
-      console.log(`[EXPLORER] Skipping navigation (pre-loaded content detected)`);
+      logger('[EXPLORER] Skipping navigation (pre-loaded content detected)');
 
       if (config.detectErrors) {
         // Get current HTML and reload it to retrigger scripts with listeners active
@@ -455,7 +458,7 @@ export class AutonomousExplorer {
         const regex = new RegExp(pattern);
         return regex.test(url);
       } catch (error) {
-        console.warn(`[EXPLORER] Invalid ignore pattern: ${pattern}`);
+        logger('[EXPLORER] Invalid ignore pattern: ' + pattern);
         return false;
       }
     });

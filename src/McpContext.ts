@@ -114,6 +114,7 @@ export class McpContext implements Context {
 
   #nextSnapshotId = 1;
   #traceResults: TraceResult[] = [];
+  #maxTraceResults = 100; // Prevent unbounded memory growth
 
   #locatorClass: typeof Locator;
   #options: McpContextOptions;
@@ -611,6 +612,10 @@ export class McpContext implements Context {
 
   storeTraceRecording(result: TraceResult): void {
     this.#traceResults.push(result);
+    // Keep only the most recent traces to prevent unbounded memory growth
+    if (this.#traceResults.length > this.#maxTraceResults) {
+      this.#traceResults.shift();
+    }
   }
 
   recordedTraces(): TraceResult[] {

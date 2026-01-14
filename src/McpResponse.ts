@@ -43,6 +43,8 @@ export class McpResponse implements Response {
   #attachedConsoleMessageId?: number;
   #textResponseLines: string[] = [];
   #images: ImageContentData[] = [];
+  #maxResponseLines = 10000; // Prevent unbounded response growth
+  #maxImages = 500;
   #networkRequestsOptions?: {
     include: boolean;
     pagination?: PaginationOptions;
@@ -159,11 +161,17 @@ export class McpResponse implements Response {
   }
 
   appendResponseLine(value: string): void {
-    this.#textResponseLines.push(value);
+    // Enforce response size limit to prevent MCP protocol issues
+    if (this.#textResponseLines.length < this.#maxResponseLines) {
+      this.#textResponseLines.push(value);
+    }
   }
 
   attachImage(value: ImageContentData): void {
-    this.#images.push(value);
+    // Enforce image count limit
+    if (this.#images.length < this.#maxImages) {
+      this.#images.push(value);
+    }
   }
 
   get responseLines(): readonly string[] {
