@@ -138,8 +138,8 @@ export class AutonomousExplorer {
       ...config,
     };
 
-    logger('[EXPLORER] Starting exploration from ' + startUrl);
-    logger('[EXPLORER] Config: maxDepth=' + fullConfig.maxDepth + ', maxPages=' + fullConfig.maxPages);
+    logger(`[EXPLORER] Starting exploration from ${startUrl}`);
+    logger(`[EXPLORER] Config: maxDepth=${fullConfig.maxDepth}, maxPages=${fullConfig.maxPages}`);
 
     const startTime = Date.now();
 
@@ -162,13 +162,13 @@ export class AutonomousExplorer {
 
       // Skip if max depth exceeded
       if (depth > fullConfig.maxDepth) {
-        logger('[EXPLORER] Max depth reached for ' + url);
+        logger(`[EXPLORER] Max depth reached for ${url}`);
         continue;
       }
 
       // Skip if URL matches ignore patterns
       if (this.shouldIgnoreUrl(url, fullConfig.ignorePatterns)) {
-        logger('[EXPLORER] Ignoring ' + url + ' (matches ignore pattern)');
+        logger(`[EXPLORER] Ignoring ${url} (matches ignore pattern)`);
         continue;
       }
 
@@ -176,13 +176,13 @@ export class AutonomousExplorer {
       if (!fullConfig.followExternal) {
         const urlDomain = new URL(url).hostname;
         if (urlDomain !== startDomain) {
-          logger('[EXPLORER] Skipping external link: ' + url);
+          logger(`[EXPLORER] Skipping external link: ${url}`);
           continue;
         }
       }
 
       // Visit page
-      logger('[EXPLORER] Visiting [' + (this.visited.size + 1) + '/' + fullConfig.maxPages + '] ' + url + ' (depth ' + depth + ')');
+      logger(`[EXPLORER] Visiting [${this.visited.size + 1}/${fullConfig.maxPages}] ${url} (depth ${depth})`);
 
       try {
         const pageInfo = await this.visitPage(page, url, depth, fullConfig);
@@ -207,7 +207,7 @@ export class AutonomousExplorer {
           }
         }
       } catch (error) {
-        logger('[EXPLORER] Failed to visit ' + url + ': ' + String(error));
+        logger(`[EXPLORER] Failed to visit ${url}: ${String(error)}`);
         // Enforce error array size limit
         if (this.allErrors.length < this.maxErrorsSize) {
           this.allErrors.push({
@@ -231,7 +231,7 @@ export class AutonomousExplorer {
       allForms.push(...pageInfo.forms);
     }
 
-    logger('[EXPLORER] Exploration complete: ' + this.visited.size + ' pages in ' + explorationTime + 'ms');
+    logger(`[EXPLORER] Exploration complete: ${this.visited.size} pages in ${explorationTime}ms`);
 
     return {
       sitemap: this.sitemap,
@@ -458,7 +458,7 @@ export class AutonomousExplorer {
         const regex = new RegExp(pattern);
         return regex.test(url);
       } catch (error) {
-        logger('[EXPLORER] Invalid ignore pattern: ' + pattern);
+        logger(`[EXPLORER] Invalid ignore pattern: ${pattern}`);
         return false;
       }
     });

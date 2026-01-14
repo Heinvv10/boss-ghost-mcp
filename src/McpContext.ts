@@ -187,7 +187,7 @@ export class McpContext implements Context {
       return request.id === cdpRequestId;
     });
     if (!request) {
-      this.logger('no network request for ' + cdpRequestId);
+      this.logger(`no network request for ${cdpRequestId}`);
       return;
     }
     return this.#networkCollector.getIdForResource(request);

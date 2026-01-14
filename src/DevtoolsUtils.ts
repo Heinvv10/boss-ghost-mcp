@@ -86,14 +86,14 @@ export function mapIssueToMessageObject(issue: DevTools.AggregatedIssue) {
   const markdownDescription = issue.getDescription();
   const filename = markdownDescription?.file;
   if (!markdownDescription) {
-    logger(`no description found for issue:` + issue.code);
+    logger(`no description found for issue: ${issue.code}`);
     return null;
   }
   const rawMarkdown = filename
     ? ISSUE_UTILS.getIssueDescription(filename)
     : null;
   if (!rawMarkdown) {
-    logger(`no markdown ${filename} found for issue:` + issue.code);
+    logger(`no markdown ${filename} found for issue: ${issue.code}`);
     return null;
   }
   let processedMarkdown: string;
@@ -109,11 +109,11 @@ export function mapIssueToMessageObject(issue: DevTools.AggregatedIssue) {
     title =
       DevTools.MarkdownIssueDescription.findTitleFromMarkdownAst(markdownAst);
   } catch {
-    logger('error parsing markdown for issue ' + issue.code());
+    logger(`error parsing markdown for issue ${issue.code()}`);
     return null;
   }
   if (!title) {
-    logger('cannot read issue title from ' + filename);
+    logger(`cannot read issue title from ${filename}`);
     return null;
   }
   return {
@@ -273,7 +273,7 @@ const SKIP_ALL_PAUSES = {
   modelAdded(model: DevTools.DebuggerModel): void {
     void model.agent.invoke_setSkipAllPauses({skip: true}).catch((error) => {
       // Log but don't rethrow - skipping pauses is optional and failures are non-critical
-      logger('Failed to set skip all pauses on debugger model: ' + String(error));
+      logger(`Failed to set skip all pauses on debugger model: ${String(error)}`);
     });
   },
 
