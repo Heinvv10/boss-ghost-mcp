@@ -10,6 +10,21 @@ export interface BossGhostConfig {
   security?: SecurityConfig;
   ghostMode?: GhostModeOverrides;
   providers?: ProvidersConfig;
+  auth?: Record<string, SiteAuthConfig>;
+}
+
+export interface SiteAuthConfig {
+  /** Auth method: 'form' for login forms, 'basic' for HTTP basic auth */
+  method: 'form' | 'basic';
+  /** Form field values keyed by input name, id, or label */
+  fields?: Record<string, string>;
+  /** CSS selector for the submit button (defaults to button[type=submit]) */
+  submitSelector?: string;
+  /** URL to navigate to before filling (e.g. /login). If omitted, uses current page */
+  loginUrl?: string;
+  /** HTTP basic auth credentials */
+  username?: string;
+  password?: string;
 }
 
 export interface ProfileConfig {

@@ -3,6 +3,7 @@
  * Copyright 2025 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
+import * as authTools from './auth.js';
 import * as autonomyTools from './autonomy.js';
 import * as consoleTools from './console.js';
 import * as emulationTools from './emulation.js';
@@ -19,6 +20,7 @@ import * as snapshotTools from './snapshot.js';
 import type {ToolDefinition} from './ToolDefinition.js';
 
 const tools = [
+  ...Object.values(authTools),
   ...Object.values(autonomyTools),
   ...Object.values(consoleTools),
   ...Object.values(emulationTools),
