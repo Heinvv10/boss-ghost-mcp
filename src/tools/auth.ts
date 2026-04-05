@@ -8,7 +8,7 @@
 import {defineTool} from './ToolDefinition.js';
 import {ToolCategory} from './categories.js';
 import {zod} from '../third_party/index.js';
-import {getConfig} from '../config/config.js';
+import {getConfig, saveConfig} from '../config/config.js';
 import {logger} from '../logger.js';
 import type {SiteAuthConfig} from '../config/types.js';
 
@@ -267,6 +267,97 @@ export const browserLogin = defineTool({
     response.appendResponseLine(`Login submitted for ${site}.`);
     response.appendResponseLine(`Current page: ${newUrl}`);
     response.includeSnapshot();
+  },
+});
+
+export const saveCredentials = defineTool({
+  name: 'save_credentials',
+  description:
+    'Capture filled login form fields from the current page and save them to ~/.boss-ghost/config.json. ' +
+    'Use this after manually filling a login form to remember the credentials for future browser_login calls. ' +
+    'Reads input values directly from the page DOM — credentials are stored locally and never sent through MCP.',
+  annotations: {
+    category: ToolCategory.INPUT,
+    readOnlyHint: false,
+  },
+  schema: {
+    site: zod
+      .string()
+      .optional()
+      .describe('Hostname to save under. Defaults to current page hostname.'),
+    submitSelector: zod
+      .string()
+      .optional()
+      .describe('CSS selector for the submit button. Defaults to button[type="submit"].'),
+  },
+  handler: async (request, response, context) => {
+    const page = context.getSelectedPage();
+    const currentUrl = page.url();
+
+    let hostname: string;
+    try {
+      hostname = request.params.site ?? new URL(currentUrl).hostname;
+    } catch {
+      response.appendResponseLine('Could not determine hostname from current page.');
+      return;
+    }
+
+    // Extract all filled form fields from the page
+    const fields = await page.evaluate(() => {
+      const result: Record<string, string> = {};
+      const inputs = Array.from(document.querySelectorAll('input, textarea'));
+
+      for (const input of inputs) {
+        const el = input as HTMLInputElement;
+        const value = el.value;
+        if (!value || value.trim().length === 0) continue;
+
+        // Skip hidden, submit, button, file, checkbox, radio inputs
+        const type = (el.type || '').toLowerCase();
+        if (['hidden', 'submit', 'button', 'file', 'image', 'reset'].includes(type)) continue;
+
+        // Determine the best key for this field
+        const key =
+          el.name ||
+          el.id ||
+          el.getAttribute('aria-label') ||
+          el.placeholder ||
+          type;
+
+        if (key) {
+          result[key] = value;
+        }
+      }
+
+      return result;
+    });
+
+    if (Object.keys(fields).length === 0) {
+      response.appendResponseLine('No filled form fields found on the current page.');
+      return;
+    }
+
+    // Save to config
+    const config = getConfig();
+    if (!config.auth) {
+      config.auth = {};
+    }
+
+    const existing = config.auth[hostname];
+    config.auth[hostname] = {
+      method: 'form',
+      fields,
+      submitSelector: request.params.submitSelector ?? existing?.submitSelector ?? 'button[type="submit"]',
+      loginUrl: existing?.loginUrl,
+    };
+
+    saveConfig(config);
+
+    // Report what was saved (field names only, not values)
+    const fieldNames = Object.keys(fields);
+    response.appendResponseLine(`Credentials saved for **${hostname}** (${fieldNames.length} fields: ${fieldNames.join(', ')}).`);
+    response.appendResponseLine(`Stored in ~/.boss-ghost/config.json.`);
+    response.appendResponseLine(`Use \`browser_login\` to auto-fill next time.`);
   },
 });
 
