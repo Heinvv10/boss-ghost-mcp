@@ -6,6 +6,7 @@
 import * as authTools from './auth.js';
 import * as autonomyTools from './autonomy.js';
 import * as consoleTools from './console.js';
+import * as desktopTools from './desktop.js';
 import * as emulationTools from './emulation.js';
 import * as inputTools from './input.js';
 import * as intelligenceTools from './intelligence.js';
@@ -23,6 +24,7 @@ const tools = [
   ...Object.values(authTools),
   ...Object.values(autonomyTools),
   ...Object.values(consoleTools),
+  ...Object.values(desktopTools),
   ...Object.values(emulationTools),
   ...Object.values(inputTools),
   ...Object.values(intelligenceTools),

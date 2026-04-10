@@ -11,6 +11,7 @@ export var ToolCategory;
     ToolCategory["PERFORMANCE"] = "performance";
     ToolCategory["NETWORK"] = "network";
     ToolCategory["DEBUGGING"] = "debugging";
+    ToolCategory["DESKTOP"] = "desktop";
 })(ToolCategory || (ToolCategory = {}));
 export const labels = {
     [ToolCategory.INPUT]: 'Input automation',
@@ -19,4 +20,5 @@ export const labels = {
     [ToolCategory.PERFORMANCE]: 'Performance',
     [ToolCategory.NETWORK]: 'Network',
     [ToolCategory.DEBUGGING]: 'Debugging',
+    [ToolCategory.DESKTOP]: 'Desktop automation',
 };
