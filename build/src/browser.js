@@ -10,6 +10,24 @@ import { logger } from './logger.js';
 import { puppeteer } from './third_party/index.js';
 import { applyGhostMode } from './ghost-mode.js';
 let browser;
+/**
+ * Actively verify the browser connection is alive by making a real CDP call.
+ * `browser.connected` is just an in-memory flag that can go stale if Chrome
+ * crashes or the WebSocket drops silently.
+ */
+async function isBrowserAlive(b) {
+    if (!b || !b.connected)
+        return false;
+    try {
+        // Perform a real CDP call — if this throws, the connection is dead
+        await b.version();
+        return true;
+    }
+    catch {
+        logger('Browser health check failed — connection is stale');
+        return false;
+    }
+}
 function makeTargetFilter() {
     const ignoredPrefixes = new Set([
         'chrome://',
@@ -34,8 +52,13 @@ function makeTargetFilter() {
 }
 export async function ensureBrowserConnected(options) {
     const { channel } = options;
-    if (browser?.connected) {
+    if (await isBrowserAlive(browser)) {
         return browser;
+    }
+    // Clear stale reference if it existed but failed health check
+    if (browser) {
+        logger('Clearing stale browser reference — reconnecting');
+        browser = undefined;
     }
     const connectOptions = {
         targetFilter: makeTargetFilter(),
@@ -54,7 +77,8 @@ export async function ensureBrowserConnected(options) {
     else if (channel || options.userDataDir) {
         const userDataDir = options.userDataDir;
         if (userDataDir) {
-            // TODO: re-expose this logic via Puppeteer.
+            // Parse DevToolsActivePort file to get the browser WebSocket endpoint.
+            // Note: Puppeteer could expose this as a public API in the future.
             const portPath = path.join(userDataDir, 'DevToolsActivePort');
             try {
                 const fileContent = await fs.promises.readFile(portPath, 'utf8');
@@ -152,8 +176,10 @@ export async function launch(options) {
             logger('Ghost Mode applied with config:', options.ghostMode);
         }
         if (options.logFile) {
-            // FIXME: we are probably subscribing too late to catch startup logs. We
-            // should expose the process earlier or expose the getRecentLogs() getter.
+            // Note: Early startup logs (during browser initialization) may be missed
+            // due to subscribing after launch completes. This is acceptable as most
+            // relevant logs occur after browser initialization. For full Chrome startup
+            // logs, use Chromium's --enable-logging flag in args.
             browser.process()?.stderr?.pipe(options.logFile);
             browser.process()?.stdout?.pipe(options.logFile);
         }
@@ -178,9 +204,112 @@ export async function launch(options) {
     }
 }
 export async function ensureBrowserLaunched(options) {
-    if (browser?.connected) {
+    if (await isBrowserAlive(browser)) {
         return browser;
+    }
+    // Clear stale reference before launching
+    if (browser) {
+        logger('Clearing stale browser reference — relaunching');
+        browser = undefined;
     }
     browser = await launch(options);
     return browser;
+}
+// --- Profile-based browser management ---
+const profileBrowsers = new Map();
+/**
+ * Launch or connect a browser for a ResolvedProfile.
+ *
+ * - 'managed' profiles launch a new Chrome via `launch()`.
+ * - 'existing-session' profiles connect to a running Chrome via `ensureBrowserConnected()`.
+ *
+ * Returns the Browser instance and caches it by profile name.
+ * If a connected browser already exists for the profile, returns it immediately.
+ */
+export async function ensureBrowserForProfile(profile, ghostMode) {
+    const existing = profileBrowsers.get(profile.name);
+    if (await isBrowserAlive(existing)) {
+        return existing;
+    }
+    // Clear stale profile browser reference
+    if (existing) {
+        logger('Clearing stale profile browser "%s" — reconnecting', profile.name);
+        profileBrowsers.delete(profile.name);
+    }
+    let instance;
+    if (profile.driver === 'managed') {
+        const userDataDir = profile.userDataDir ??
+            path.join(os.homedir(), '.boss-ghost', 'profiles', profile.name, 'chrome-data');
+        const args = [...profile.extraArgs];
+        if (profile.cdpPort) {
+            args.push(`--remote-debugging-port=${profile.cdpPort}`);
+        }
+        instance = await launch({
+            headless: profile.headless,
+            channel: profile.channel,
+            executablePath: profile.executablePath,
+            userDataDir,
+            args,
+            isolated: false,
+            devtools: false,
+            ghostMode,
+        });
+    }
+    else {
+        // existing-session: connect to a running browser
+        if (profile.cdpUrl) {
+            instance = await ensureBrowserConnected({
+                wsEndpoint: profile.cdpUrl,
+                devtools: false,
+            });
+        }
+        else {
+            instance = await ensureBrowserConnected({
+                browserURL: `http://127.0.0.1:${profile.cdpPort}`,
+                devtools: false,
+            });
+        }
+        // Apply ghost mode to connected browsers manually since launch() won't do it
+        if (ghostMode) {
+            await applyGhostMode(instance, ghostMode);
+            logger('Ghost Mode applied to connected profile "%s"', profile.name);
+        }
+    }
+    profileBrowsers.set(profile.name, instance);
+    logger('Browser ready for profile "%s" (driver=%s)', profile.name, profile.driver);
+    return instance;
+}
+/**
+ * Retrieve a cached browser instance by profile name.
+ * Returns undefined if no browser exists or it has disconnected.
+ */
+export async function getBrowserForProfile(name) {
+    const instance = profileBrowsers.get(name);
+    if (!instance)
+        return undefined;
+    if (!(await isBrowserAlive(instance))) {
+        logger('Profile browser "%s" is stale — removing from cache', name);
+        profileBrowsers.delete(name);
+        return undefined;
+    }
+    return instance;
+}
+/**
+ * Close/disconnect a profile's browser and remove it from the cache.
+ */
+export async function closeBrowserForProfile(name) {
+    const instance = profileBrowsers.get(name);
+    if (!instance) {
+        return;
+    }
+    profileBrowsers.delete(name);
+    if (instance.connected) {
+        try {
+            await instance.close();
+            logger('Closed browser for profile "%s"', name);
+        }
+        catch (err) {
+            logger('Error closing browser for profile "%s": %s', name, err);
+        }
+    }
 }

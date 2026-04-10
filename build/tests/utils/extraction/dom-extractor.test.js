@@ -61,10 +61,11 @@ describe('DomExtractor', () => {
                 });
                 const extractor = new DomExtractor();
                 const result = await extractor.extract(page, schema);
-                assert.equal(result.images.length, 3);
-                assert.ok(result.images[0].includes('image1.jpg'));
-                assert.ok(result.images[1].includes('image2.jpg'));
-                assert.ok(result.images[2].includes('image3.jpg'));
+                const images = result.images;
+                assert.equal(images.length, 3);
+                assert.ok(images[0].includes('image1.jpg'));
+                assert.ok(images[1].includes('image2.jpg'));
+                assert.ok(images[2].includes('image3.jpg'));
             });
         });
         it('should extract boolean fields from text', async () => {

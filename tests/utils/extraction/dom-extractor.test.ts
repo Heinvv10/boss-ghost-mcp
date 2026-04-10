@@ -78,10 +78,11 @@ describe('DomExtractor', () => {
         const extractor = new DomExtractor();
         const result = await extractor.extract(page, schema);
 
-        assert.equal(result.images.length, 3);
-        assert.ok(result.images[0].includes('image1.jpg'));
-        assert.ok(result.images[1].includes('image2.jpg'));
-        assert.ok(result.images[2].includes('image3.jpg'));
+        const images = result.images as string[];
+        assert.equal(images.length, 3);
+        assert.ok(images[0].includes('image1.jpg'));
+        assert.ok(images[1].includes('image2.jpg'));
+        assert.ok(images[2].includes('image3.jpg'));
       });
     });
 
@@ -200,7 +201,7 @@ describe('DomExtractor', () => {
 
         assert.equal(result.name, 'Semantic Product');
         assert.equal(result.price, 42.00);
-        assert.ok(result.image.includes('product.jpg'));
+        assert.ok((result.image as string).includes('product.jpg'));
       });
     });
 
@@ -308,7 +309,7 @@ describe('DomExtractor', () => {
         assert.equal(result.description, 'Premium noise-cancelling headphones');
         assert.equal(result.price, 299.99);
         assert.equal(result.inStock, true);
-        assert.equal(result.images.length, 2);
+        assert.equal((result.images as string[]).length, 2);
         assert.equal(result.email, 'support@example.com');
       });
     });

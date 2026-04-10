@@ -21,6 +21,23 @@ import type {ResolvedProfile} from './config/profiles.js';
 
 let browser: Browser | undefined;
 
+/**
+ * Actively verify the browser connection is alive by making a real CDP call.
+ * `browser.connected` is just an in-memory flag that can go stale if Chrome
+ * crashes or the WebSocket drops silently.
+ */
+async function isBrowserAlive(b: Browser | undefined): Promise<boolean> {
+  if (!b || !b.connected) return false;
+  try {
+    // Perform a real CDP call — if this throws, the connection is dead
+    await b.version();
+    return true;
+  } catch {
+    logger('Browser health check failed — connection is stale');
+    return false;
+  }
+}
+
 function makeTargetFilter() {
   const ignoredPrefixes = new Set([
     'chrome://',
@@ -54,8 +71,14 @@ export async function ensureBrowserConnected(options: {
   userDataDir?: string;
 }) {
   const {channel} = options;
-  if (browser?.connected) {
-    return browser;
+  if (await isBrowserAlive(browser)) {
+    return browser!;
+  }
+
+  // Clear stale reference if it existed but failed health check
+  if (browser) {
+    logger('Clearing stale browser reference — reconnecting');
+    browser = undefined;
   }
 
   const connectOptions: Parameters<typeof puppeteer.connect>[0] = {
@@ -244,9 +267,16 @@ export async function launch(options: McpLaunchOptions): Promise<Browser> {
 export async function ensureBrowserLaunched(
   options: McpLaunchOptions,
 ): Promise<Browser> {
-  if (browser?.connected) {
-    return browser;
+  if (await isBrowserAlive(browser)) {
+    return browser!;
   }
+
+  // Clear stale reference before launching
+  if (browser) {
+    logger('Clearing stale browser reference — relaunching');
+    browser = undefined;
+  }
+
   browser = await launch(options);
   return browser;
 }
@@ -271,8 +301,14 @@ export async function ensureBrowserForProfile(
   ghostMode?: Partial<GhostModeConfig>,
 ): Promise<Browser> {
   const existing = profileBrowsers.get(profile.name);
-  if (existing?.connected) {
-    return existing;
+  if (await isBrowserAlive(existing)) {
+    return existing!;
+  }
+
+  // Clear stale profile browser reference
+  if (existing) {
+    logger('Clearing stale profile browser "%s" — reconnecting', profile.name);
+    profileBrowsers.delete(profile.name);
   }
 
   let instance: Browser;
@@ -333,9 +369,11 @@ export async function ensureBrowserForProfile(
  * Retrieve a cached browser instance by profile name.
  * Returns undefined if no browser exists or it has disconnected.
  */
-export function getBrowserForProfile(name: string): Browser | undefined {
+export async function getBrowserForProfile(name: string): Promise<Browser | undefined> {
   const instance = profileBrowsers.get(name);
-  if (instance && !instance.connected) {
+  if (!instance) return undefined;
+  if (!(await isBrowserAlive(instance))) {
+    logger('Profile browser "%s" is stale — removing from cache', name);
     profileBrowsers.delete(name);
     return undefined;
   }

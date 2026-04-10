@@ -34,18 +34,14 @@ server.server.setRequestHandler(SetLevelRequestSchema, () => {
     return {};
 });
 let context;
-async function getContext() {
-    const extraArgs = (args.chromeArg ?? []).map(String);
-    if (args.proxyServer) {
-        extraArgs.push(`--proxy-server=${args.proxyServer}`);
-    }
-    const devtools = args.experimentalDevtools ?? false;
-    const browser = args.browserUrl || args.wsEndpoint || args.autoConnect
+const MAX_CONNECT_RETRIES = 2;
+const RETRY_DELAY_MS = 1000;
+async function connectBrowser(devtools, extraArgs) {
+    return args.browserUrl || args.wsEndpoint || args.autoConnect
         ? await ensureBrowserConnected({
             browserURL: args.browserUrl,
             wsEndpoint: args.wsEndpoint,
             wsHeaders: args.wsHeaders,
-            // Important: only pass channel, if autoConnect is true.
             channel: args.autoConnect ? args.channel : undefined,
             userDataDir: args.userDataDir,
             devtools,
@@ -61,7 +57,6 @@ async function getContext() {
             args: extraArgs,
             acceptInsecureCerts: args.acceptInsecureCerts,
             devtools,
-            // 🟢 WORKING: Enable Ghost Mode by default
             ghostMode: {
                 enabled: true,
                 stealthLevel: 'maximum',
@@ -70,13 +65,34 @@ async function getContext() {
                 enableBotDetectionEvasion: true,
             },
         });
-    if (context?.browser !== browser) {
-        context = await McpContext.from(browser, logger, {
-            experimentalDevToolsDebugging: devtools,
-            experimentalIncludeAllPages: args.experimentalIncludeAllPages,
-        });
+}
+async function getContext() {
+    const extraArgs = (args.chromeArg ?? []).map(String);
+    if (args.proxyServer) {
+        extraArgs.push(`--proxy-server=${args.proxyServer}`);
     }
-    return context;
+    const devtools = args.experimentalDevtools ?? false;
+    let lastError;
+    for (let attempt = 0; attempt <= MAX_CONNECT_RETRIES; attempt++) {
+        try {
+            const browser = await connectBrowser(devtools, extraArgs);
+            if (context?.browser !== browser) {
+                context = await McpContext.from(browser, logger, {
+                    experimentalDevToolsDebugging: devtools,
+                    experimentalIncludeAllPages: args.experimentalIncludeAllPages,
+                });
+            }
+            return context;
+        }
+        catch (err) {
+            lastError = err;
+            logger('Browser connection attempt %d/%d failed: %s', attempt + 1, MAX_CONNECT_RETRIES + 1, err);
+            if (attempt < MAX_CONNECT_RETRIES) {
+                await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+            }
+        }
+    }
+    throw lastError;
 }
 const logDisclaimers = () => {
     console.error(`chrome-devtools-mcp exposes content of the browser instance to the MCP clients allowing them to inspect,
