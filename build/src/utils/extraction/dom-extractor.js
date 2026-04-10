@@ -18,6 +18,9 @@ export class DomExtractor {
         // Extract type information before page.evaluate (can't serialize Zod schemas)
         const fieldTypes = {};
         for (const [fieldName, fieldSchema] of Object.entries(schemaShape)) {
+            // Type assertion: Accessing Zod's internal _def property to introspect schema structure.
+            // The _def property is not exposed in Zod's public TypeScript types but is necessary for
+            // extracting type information before serializing schemas for browser evaluation.
             const def = fieldSchema._def;
             const type = def.type;
             // For arrays, also extract the element type

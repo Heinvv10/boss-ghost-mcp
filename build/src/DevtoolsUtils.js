@@ -69,14 +69,14 @@ export function mapIssueToMessageObject(issue) {
     const markdownDescription = issue.getDescription();
     const filename = markdownDescription?.file;
     if (!markdownDescription) {
-        logger(`no description found for issue:` + issue.code);
+        logger(`no description found for issue: ${issue.code}`);
         return null;
     }
     const rawMarkdown = filename
         ? ISSUE_UTILS.getIssueDescription(filename)
         : null;
     if (!rawMarkdown) {
-        logger(`no markdown ${filename} found for issue:` + issue.code);
+        logger(`no markdown ${filename} found for issue: ${issue.code}`);
         return null;
     }
     let processedMarkdown;
@@ -89,11 +89,11 @@ export function mapIssueToMessageObject(issue) {
             DevTools.MarkdownIssueDescription.findTitleFromMarkdownAst(markdownAst);
     }
     catch {
-        logger('error parsing markdown for issue ' + issue.code());
+        logger(`error parsing markdown for issue ${issue.code()}`);
         return null;
     }
     if (!title) {
-        logger('cannot read issue title from ' + filename);
+        logger(`cannot read issue title from ${filename}`);
         return null;
     }
     return {
@@ -104,8 +104,20 @@ export function mapIssueToMessageObject(issue) {
         description: processedMarkdown,
     };
 }
-// DevTools CDP errors can get noisy.
-DevTools.ProtocolClient.InspectorBackend.test.suppressRequestErrors = true;
+// DevTools CDP errors handling
+// We implement selective error filtering based on DEBUG mode:
+// - DEBUG mode: All errors visible for troubleshooting CDP communication issues
+// - Production: Errors suppressed but significant issues are caught by error handlers
+// This approach reduces noise while maintaining visibility of real CDP issues.
+// See: https://github.com/ChromeDevTools/devtools-frontend
+if (process.env['DEBUG']?.includes('devtools')) {
+    DevTools.ProtocolClient.InspectorBackend.test.suppressRequestErrors = false;
+    logger('DevTools error suppression disabled (DEBUG mode)');
+}
+else {
+    // In production, we suppress errors to reduce noise
+    DevTools.ProtocolClient.InspectorBackend.test.suppressRequestErrors = true;
+}
 DevTools.I18n.DevToolsLocale.DevToolsLocale.instance({
     create: true,
     data: {
@@ -189,7 +201,10 @@ const DEFAULT_FACTORY = async (page) => {
     const connection = new PuppeteerDevToolsConnection(session);
     const targetManager = universe.context.get(DevTools.TargetManager);
     targetManager.observeModels(DevTools.DebuggerModel, SKIP_ALL_PAUSES);
-    const target = targetManager.createTarget('main', '', 'frame', // eslint-disable-line @typescript-eslint/no-explicit-any
+    // Create DevTools target for the CDP session
+    // Using 'frame' type for main page target as per DevTools SDK conventions
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const target = targetManager.createTarget('main', '', 'frame', // DevTools.SDKTarget.Type - cast necessary due to type library interface
     /* parentTarget */ null, session.id(), undefined, connection);
     return { target, universe };
 };
@@ -200,7 +215,10 @@ const DEFAULT_FACTORY = async (page) => {
 // see the `Debugger.paused`/`Debugger.resumed` events on the MCP side.
 const SKIP_ALL_PAUSES = {
     modelAdded(model) {
-        void model.agent.invoke_setSkipAllPauses({ skip: true });
+        void model.agent.invoke_setSkipAllPauses({ skip: true }).catch((error) => {
+            // Log but don't rethrow - skipping pauses is optional and failures are non-critical
+            logger(`Failed to set skip all pauses on debugger model: ${String(error)}`);
+        });
     },
     modelRemoved() {
         // Do nothing.

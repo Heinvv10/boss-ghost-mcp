@@ -5,9 +5,19 @@
  */
 import { isUtf8 } from 'node:buffer';
 const BODY_CONTEXT_SIZE_LIMIT = 10000;
+const MAX_URL_LENGTH = 150;
+function truncateUrl(url) {
+    if (url.length <= MAX_URL_LENGTH) {
+        return url;
+    }
+    // Truncate in the middle to preserve both scheme and path
+    const prefix = url.substring(0, Math.floor(MAX_URL_LENGTH * 0.6));
+    const suffix = url.substring(url.length - Math.floor(MAX_URL_LENGTH * 0.4));
+    return prefix + '...' + suffix;
+}
 export function getShortDescriptionForRequest(request, id, selectedInDevToolsUI = false) {
-    // TODO truncate the URL
-    return `reqid=${id} ${request.method()} ${request.url()} ${getStatusFromRequest(request)}${selectedInDevToolsUI ? ` [selected in the DevTools Network panel]` : ''}`;
+    const truncatedUrl = truncateUrl(request.url());
+    return `reqid=${id} ${request.method()} ${truncatedUrl} ${getStatusFromRequest(request)}${selectedInDevToolsUI ? ` [selected in the DevTools Network panel]` : ''}`;
 }
 export function getStatusFromRequest(request) {
     const httpResponse = request.response();

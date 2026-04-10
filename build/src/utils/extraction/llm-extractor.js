@@ -5,6 +5,8 @@
  */
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
+import { logger } from '../../logger.js';
+import { describeZodSchema, } from '../../types/zod-schemas.js';
 /**
  * LLM-based data extraction with cascading providers
  * Primary: OpenAI GPT-4o-mini (fast, cheap)
@@ -26,7 +28,7 @@ export class LlmExtractor {
         }
         // Require at least one provider
         if (!this.openaiClient && !this.claudeClient) {
-            throw new Error('At least one API key required: OPENAI_API_KEY (primary) or ANTHROPIC_API_KEY (fallback)');
+            throw new Error('LLM extraction requires at least one API provider to be configured. Please set up OpenAI or Anthropic credentials.');
         }
     }
     /**
@@ -53,36 +55,36 @@ export class LlmExtractor {
         const schemaDescription = this.describeSchema(schema);
         // Construct extraction prompt
         const prompt = this.buildPrompt(schemaDescription, instructions, cleanedHtml);
-        let result;
+        let result = null;
         let lastError = null;
         // Attempt 1: OpenAI GPT-4o-mini (primary)
         if (this.openaiClient) {
             try {
-                console.log('[LLM] Attempting extraction with OpenAI GPT-4o-mini...');
+                logger('[LLM] Attempting extraction with OpenAI GPT-4o-mini');
                 result = await this.extractWithOpenAI(prompt, schema);
-                console.log('[LLM] ✅ OpenAI extraction successful');
+                logger('[LLM] OpenAI extraction successful');
                 return result;
             }
             catch (error) {
                 lastError = error instanceof Error ? error : new Error(String(error));
-                console.log(`[LLM] ⚠️ OpenAI extraction failed: ${lastError.message}`);
-                console.log('[LLM] 🔄 Falling back to Claude Haiku...');
+                logger(`[LLM] OpenAI extraction failed, falling back to Claude: ${lastError.message}`);
             }
         }
         // Attempt 2: Claude 3.5 Haiku (fallback)
         if (this.claudeClient) {
             try {
                 result = await this.extractWithClaude(prompt, schema);
-                console.log('[LLM] ✅ Claude extraction successful (fallback)');
+                logger('[LLM] Claude extraction successful (fallback)');
                 return result;
             }
             catch (error) {
                 lastError = error instanceof Error ? error : new Error(String(error));
-                console.log(`[LLM] ❌ Claude extraction failed: ${lastError.message}`);
+                logger(`[LLM] Claude extraction failed: ${lastError.message}`);
             }
         }
         // Both attempts failed
         throw new Error(`LLM extraction failed with all providers. Last error: ${lastError?.message || 'Unknown error'}`);
+        // Note: TypeScript ensures result is non-null before reaching return statements above
     }
     /**
      * Extract using OpenAI GPT-4o-mini
@@ -106,8 +108,16 @@ export class LlmExtractor {
             throw new Error('No content in OpenAI response');
         }
         // Parse and validate JSON
-        const extracted = JSON.parse(content);
-        return schema.parse(extracted);
+        try {
+            const extracted = JSON.parse(content);
+            return schema.parse(extracted);
+        }
+        catch (error) {
+            if (error instanceof SyntaxError) {
+                throw new Error(`Failed to parse OpenAI JSON response: Invalid JSON format (${error.message})`);
+            }
+            throw new Error(`Failed to validate OpenAI response against schema: ${error instanceof Error ? error.message : String(error)}`);
+        }
     }
     /**
      * Extract using Claude 3.5 Haiku
@@ -133,8 +143,17 @@ export class LlmExtractor {
         if (!jsonMatch) {
             throw new Error('No JSON found in Claude response');
         }
-        const extracted = JSON.parse(jsonMatch[0]);
-        return schema.parse(extracted);
+        // Parse and validate JSON
+        try {
+            const extracted = JSON.parse(jsonMatch[0]);
+            return schema.parse(extracted);
+        }
+        catch (error) {
+            if (error instanceof SyntaxError) {
+                throw new Error(`Failed to parse Claude JSON response: Invalid JSON format (${error.message})`);
+            }
+            throw new Error(`Failed to validate Claude response against schema: ${error instanceof Error ? error.message : String(error)}`);
+        }
     }
     /**
      * Build extraction prompt
@@ -176,42 +195,9 @@ ${htmlContent}`;
     }
     /**
      * Generate human-readable schema description for LLMs
+     * Uses type-safe helper from zod-schemas module
      */
     describeSchema(schema) {
-        const shape = schema.shape;
-        const fields = [];
-        for (const [fieldName, fieldSchema] of Object.entries(shape)) {
-            const def = fieldSchema._def;
-            // Zod v4 uses _def.type instead of _def.typeName
-            const type = def.type;
-            const isOptional = type === 'optional';
-            let typeDesc = '';
-            if (type === 'string') {
-                typeDesc = 'string';
-            }
-            else if (type === 'number') {
-                typeDesc = 'number';
-            }
-            else if (type === 'boolean') {
-                typeDesc = 'boolean';
-            }
-            else if (type === 'array') {
-                const innerType = def.element?._def?.type || 'unknown';
-                typeDesc = `array of ${innerType}s`;
-            }
-            else if (type === 'object') {
-                typeDesc = 'object';
-            }
-            else if (type === 'optional') {
-                const innerDef = def.innerType?._def;
-                const innerType = innerDef?.type || 'unknown';
-                typeDesc = `optional ${innerType}`;
-            }
-            else {
-                typeDesc = type || 'unknown';
-            }
-            fields.push(`  - ${fieldName}: ${typeDesc}${isOptional ? ' (optional)' : ''}`);
-        }
-        return fields.join('\n');
+        return describeZodSchema(schema);
     }
 }

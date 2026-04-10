@@ -3,6 +3,9 @@
  * Copyright 2025 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
+import { getConfig } from './config/config.js';
+import { redact } from './security/redact.js';
+import { wrapExternalContent } from './security/content-wrapper.js';
 import { mapIssueToMessageObject } from './DevtoolsUtils.js';
 import { formatConsoleEventShort, formatConsoleEventVerbose, } from './formatters/consoleFormatter.js';
 import { getFormattedHeaderValue, getFormattedResponseBody, getFormattedRequestBody, getShortDescriptionForRequest, getStatusFromRequest, } from './formatters/networkFormatter.js';
@@ -17,6 +20,8 @@ export class McpResponse {
     #attachedConsoleMessageId;
     #textResponseLines = [];
     #images = [];
+    #maxResponseLines = 10000; // Prevent unbounded response growth
+    #maxImages = 500;
     #networkRequestsOptions;
     #consoleDataOptions;
     #devToolsData;
@@ -94,10 +99,16 @@ export class McpResponse {
         return this.#consoleDataOptions?.types;
     }
     appendResponseLine(value) {
-        this.#textResponseLines.push(value);
+        // Enforce response size limit to prevent MCP protocol issues
+        if (this.#textResponseLines.length < this.#maxResponseLines) {
+            this.#textResponseLines.push(value);
+        }
     }
     attachImage(value) {
-        this.#images.push(value);
+        // Enforce image count limit
+        if (this.#images.length < this.#maxImages) {
+            this.#images.push(value);
+        }
     }
     get responseLines() {
         return this.#textResponseLines;
@@ -266,7 +277,9 @@ Call ${handleDialog.name} to handle it before continuing.`);
         }
         if (data.formattedSnapshot) {
             response.push('## Latest page snapshot');
-            response.push(data.formattedSnapshot);
+            const pageUrl = context.getSelectedPage().url();
+            const wrappedSnapshot = wrapExternalContent(data.formattedSnapshot, pageUrl);
+            response.push(wrappedSnapshot);
         }
         response.push(...this.#formatNetworkRequestData(context, data.bodies));
         response.push(...this.#formatConsoleData(context, data.consoleData));
@@ -305,9 +318,14 @@ Call ${handleDialog.name} to handle it before continuing.`);
                 response.push('<no console messages found>');
             }
         }
+        const redactionConfig = getConfig().security?.redaction;
+        const rawText = response.join('\n');
         const text = {
             type: 'text',
-            text: response.join('\n'),
+            text: redact(rawText, {
+                enabled: redactionConfig?.enabled,
+                additionalPatterns: redactionConfig?.patterns,
+            }),
         };
         const images = this.#images.map(imageData => {
             return {

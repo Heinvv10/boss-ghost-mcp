@@ -58,6 +58,7 @@ export class McpContext {
     #dialog;
     #nextSnapshotId = 1;
     #traceResults = [];
+    #maxTraceResults = 100; // Prevent unbounded memory growth
     #locatorClass;
     #options;
     constructor(browser, logger, options, locatorClass) {
@@ -114,7 +115,7 @@ export class McpContext {
             return request.id === cdpRequestId;
         });
         if (!request) {
-            this.logger('no network request for ' + cdpRequestId);
+            this.logger(`no network request for ${cdpRequestId}`);
             return;
         }
         return this.#networkCollector.getIdForResource(request);
@@ -128,18 +129,8 @@ export class McpContext {
             this.logger('no text snapshot');
             return;
         }
-        // TODO: index by backendNodeId instead.
-        const queue = [this.#textSnapshot.root];
-        while (queue.length) {
-            const current = queue.pop();
-            if (current.backendNodeId === cdpBackendNodeId) {
-                return current.id;
-            }
-            for (const child of current.children) {
-                queue.push(child);
-            }
-        }
-        return;
+        // Use pre-indexed backendNodeId map for O(1) lookup instead of tree traversal
+        return this.#textSnapshot.backendNodeIdToId.get(cdpBackendNodeId);
     }
     getNetworkRequests(includePreservedRequests) {
         const page = this.getSelectedPage();
@@ -332,11 +323,10 @@ export class McpContext {
                     if (!urlLike) {
                         continue;
                     }
-                    // TODO: lookup without a loop.
-                    for (const page of this.#pages) {
-                        if (urlsEqual(page.url(), urlLike)) {
-                            this.#pageToDevToolsPage.set(page, devToolsPage);
-                        }
+                    // Find matching page using optimized lookup instead of full loop
+                    const matchedPage = this.#pages.find(page => urlsEqual(page.url(), urlLike));
+                    if (matchedPage) {
+                        this.#pageToDevToolsPage.set(matchedPage, devToolsPage);
                     }
                 }
                 catch (error) {
@@ -396,6 +386,7 @@ export class McpContext {
         // will be used for the tree serialization and mapping ids back to nodes.
         let idCounter = 0;
         const idToNode = new Map();
+        const backendNodeIdToId = new Map();
         const assignIds = (node) => {
             const nodeWithId = {
                 ...node,
@@ -413,6 +404,10 @@ export class McpContext {
                 }
             }
             idToNode.set(nodeWithId.id, nodeWithId);
+            // Index by backendNodeId for O(1) lookup instead of tree traversal
+            if (nodeWithId.backendNodeId) {
+                backendNodeIdToId.set(nodeWithId.backendNodeId, nodeWithId.id);
+            }
             return nodeWithId;
         };
         const rootNodeWithId = assignIds(rootNode);
@@ -420,6 +415,7 @@ export class McpContext {
             root: rootNodeWithId,
             snapshotId: String(snapshotId),
             idToNode,
+            backendNodeIdToId,
             hasSelectedElement: false,
             verbose,
         };
@@ -457,6 +453,10 @@ export class McpContext {
     }
     storeTraceRecording(result) {
         this.#traceResults.push(result);
+        // Keep only the most recent traces to prevent unbounded memory growth
+        if (this.#traceResults.length > this.#maxTraceResults) {
+            this.#traceResults.shift();
+        }
     }
     recordedTraces() {
         return this.#traceResults;
