@@ -29,7 +29,8 @@
     "test:dev-tools": "vitest tests/dev-tools",
     "test:antigravity": "vitest tests/antigravity",
     "test:sprint": "vitest tests/sprint-validation.test.ts",
-    "prepare": "npx tsx scripts/prepare.ts",
+    "prepare:cleanup": "npx tsx scripts/prepare.ts",
+    "prepare": "npm run prepare:cleanup && npm run bundle",
     "verify-server-json-version": "npx tsx scripts/verify-server-json-version.ts"
   },
   "files": [
