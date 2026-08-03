@@ -9,7 +9,11 @@ import './polyfill.js';
 import process from 'node:process';
 
 import type {Channel} from './browser.js';
-import {ensureBrowserConnected, ensureBrowserLaunched} from './browser.js';
+import {
+  closeAllBrowsers,
+  ensureBrowserConnected,
+  ensureBrowserLaunched,
+} from './browser.js';
 import {parseArguments} from './cli.js';
 import {loadIssueDescriptions} from './issue-descriptions.js';
 import {logger, saveLogsToFile} from './logger.js';
@@ -205,3 +209,33 @@ const transport = new StdioServerTransport();
 await server.connect(transport);
 logger('Chrome DevTools MCP Server connected');
 logDisclaimers();
+
+// --- Graceful shutdown -------------------------------------------------------
+// A stdio MCP server must release its browser and exit when its client
+// disconnects. Otherwise the live CDP connection keeps the event loop alive and
+// orphans a headless Chrome — with every page it accumulated — after the
+// session ends, leaking gigabytes across a day of sessions. Trigger on parent
+// disconnect (stdin EOF) and termination signals.
+let shuttingDown = false;
+async function gracefulShutdown(reason: string): Promise<void> {
+  if (shuttingDown) {
+    return;
+  }
+  shuttingDown = true;
+  logger('Shutting down (%s): closing browsers', reason);
+  // Backstop: force-exit if a browser close hangs so we never linger.
+  const force = setTimeout(() => process.exit(0), 5000);
+  force.unref();
+  try {
+    await closeAllBrowsers();
+  } catch (err) {
+    logger('Error closing browsers during shutdown: %s', err);
+  }
+  process.exit(0);
+}
+
+process.stdin.on('end', () => void gracefulShutdown('stdin end'));
+process.stdin.on('close', () => void gracefulShutdown('stdin close'));
+for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
+  process.on(signal, () => void gracefulShutdown(signal));
+}

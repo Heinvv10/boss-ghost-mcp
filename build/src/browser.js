@@ -313,3 +313,12 @@ export async function closeBrowserForProfile(name) {
         }
     }
 }
+/**
+ * Close every browser launched during this process's lifetime. Called on
+ * shutdown (stdin/transport close or termination signal) so an instance never
+ * orphans a headless Chrome after its MCP client disconnects.
+ */
+export async function closeAllBrowsers() {
+    const names = [...profileBrowsers.keys()];
+    await Promise.all(names.map(name => closeBrowserForProfile(name)));
+}
